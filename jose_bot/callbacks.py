@@ -5,23 +5,23 @@ from nio import (
     InviteMemberEvent,
     JoinError,
     MatrixRoom,
-    MegolmEvent,
+    PowerLevels,
     RoomGetEventError,
-    RoomMessageText,
+    RoomGetStateEventError,
+    RoomMemberEvent,
+    RoomPutStateError,
     UnknownEvent,
 )
 
-from jose_bot.bot_commands import Command
-from jose_bot.chat_functions import make_pill, react_to_event, send_text_to_room
+from jose_bot.chat_functions import send_text_to_room
 from jose_bot.config import Config
-from jose_bot.message_responses import Message
-from jose_bot.storage import Storage
+from jose_bot.utils import get_bot_event_type, hash_user_id, is_bot_event, user_name
 
 logger = logging.getLogger(__name__)
 
 
 class Callbacks:
-    def __init__(self, client: AsyncClient, store: Storage, config: Config):
+    def __init__(self, client: AsyncClient, config: Config):
         """
         Args:
             client: nio client used to interact with matrix.
@@ -31,51 +31,7 @@ class Callbacks:
             config: Bot configuration parameters.
         """
         self.client = client
-        self.store = store
         self.config = config
-        self.command_prefix = config.command_prefix
-
-    async def message(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        """Callback for when a message event is received
-
-        Args:
-            room: The room the event came from.
-
-            event: The event defining the message.
-        """
-        # Extract the message text
-        msg = event.body
-
-        # Ignore messages from ourselves
-        if event.sender == self.client.user:
-            return
-
-        logger.debug(
-            f"Bot message received for room {room.display_name} | "
-            f"{room.user_name(event.sender)}: {msg}"
-        )
-
-        # Process as message if in a public room without command prefix
-        has_command_prefix = msg.startswith(self.command_prefix)
-
-        # room.is_group is often a DM, but not always.
-        # room.is_group does not allow room aliases
-        # room.member_count > 2 ... we assume a public room
-        # room.member_count <= 2 ... we assume a DM
-        if not has_command_prefix and room.member_count > 2:
-            # General message listener
-            message = Message(self.client, self.store, self.config, msg, room, event)
-            await message.process()
-            return
-
-        # Otherwise if this is in a 1-1 with the bot or features a command prefix,
-        # treat it as a command
-        if has_command_prefix:
-            # Remove the command prefix
-            msg = msg[len(self.command_prefix) :]
-
-        command = Command(self.client, self.store, self.config, msg, room, event)
-        await command.process()
 
     async def invite(self, room: MatrixRoom, event: InviteMemberEvent) -> None:
         """Callback for when an invite is received. Join the room specified in the invite.
@@ -139,53 +95,34 @@ class Callbacks:
             )
             return
         reacted_to_event = event_response.event
+        if (
+            is_bot_event(reacted_to_event)
+            and get_bot_event_type(reacted_to_event) == "join_confirm"
+        ):
+            content = reacted_to_event.source.get("content")
+            state_key = content.get("io.github.shadowrz.jose_bot", {}).get("state_key")
+            required_reaction = hash_user_id(state_key)
 
-        # Only acknowledge reactions to events that we sent
-        if reacted_to_event.sender != self.config.user_id:
-            return
-
-        # Send a message acknowledging the reaction
-        reaction_sender_pill = make_pill(event.sender)
         reaction_content = (
             event.source.get("content", {}).get("m.relates_to", {}).get("key")
         )
-        message = (
-            f"{reaction_sender_pill} reacted to this event with `{reaction_content}`!"
-        )
-        await send_text_to_room(
-            self.client,
-            room.room_id,
-            message,
-            reply_to_event_id=reacted_to_id,
-        )
 
-    async def decryption_failure(self, room: MatrixRoom, event: MegolmEvent) -> None:
-        """Callback for when an event fails to decrypt. Inform the user.
-
-        Args:
-            room: The room that the event that we were unable to decrypt is in.
-
-            event: The encrypted event that we were unable to decrypt.
-        """
-        logger.error(
-            f"Failed to decrypt event '{event.event_id}' in room '{room.room_id}'!"
-            f"\n\n"
-            f"Tip: try using a different device ID in your config file and restart."
-            f"\n\n"
-            f"If all else fails, delete your store directory and let the bot recreate "
-            f"it (your reminders will NOT be deleted, but the bot may respond to existing "
-            f"commands a second time)."
-        )
-
-        red_x_and_lock_emoji = "❌ 🔐"
-
-        # React to the undecryptable event with some emoji
-        await react_to_event(
-            self.client,
-            room.room_id,
-            event.event_id,
-            red_x_and_lock_emoji,
-        )
+        if reaction_content == required_reaction:
+            state_resp = await self.client.room_get_state_event(
+                room.room_id, "m.room.power_levels"
+            )
+            if isinstance(state_resp, RoomGetStateEventError):
+                logger.debug(
+                    f"Failed to get power level data in room {room.display_name} ({room.room_id}). Stop processing."
+                )
+                return
+            content = state_resp.content
+            events = content.get("events")
+            users = content.get("users")
+            del users[state_key]
+            await self.client.room_put_state(
+                room.room_id, "m.room.power_levels", {"events": events, "users": users}
+            )
 
     async def unknown(self, room: MatrixRoom, event: UnknownEvent) -> None:
         """Callback for when an event with a type that is unknown to matrix-nio is received.
@@ -209,3 +146,49 @@ class Callbacks:
         logger.debug(
             f"Got unknown event with type to {event.type} from {event.sender} in {room.room_id}."
         )
+
+    async def membership(self, room: MatrixRoom, event: RoomMemberEvent) -> None:
+        if event.membership == "join" and event.prev_membership in (
+            None,
+            "invite",
+            "leave",
+        ):
+            content = event.content or {}
+            name = content.get("displayname")
+            logger.debug(
+                f"New user joined in {room.display_name}: {name} ({event.state_key})"
+            )
+            state_resp = await self.client.room_get_state_event(
+                room.room_id, "m.room.power_levels"
+            )
+            if isinstance(state_resp, RoomGetStateEventError):
+                logger.debug(
+                    f"Failed to get power level data in room {room.display_name} ({room.room_id}). Stop processing."
+                )
+                return
+            content = state_resp.content
+            events = content.get("events")
+            events["m.reaction"] = -1
+            users = content.get("users")
+            powers = PowerLevels(events=events, users=users)
+            if not powers.can_user_send_state(self.client.user, "m.room.power_levels"):
+                logger.debug(
+                    f"Bot is unable to update power levels in {room.display_name} ({room.room_id}). Stop processing."
+                )
+                return
+            users[event.state_key] = -1
+            put_state_resp = await self.client.room_put_state(
+                room.room_id, "m.room.power_levels", {"events": events, "users": users}
+            )
+            if isinstance(put_state_resp, RoomPutStateError):
+                logger.warn(
+                    f"Failed to reconfigure power level: {put_state_resp.message}"
+                )
+                return
+            await send_text_to_room(
+                self.client,
+                room.room_id,
+                f"新加群的用户 {user_name(room, event.state_key)} ({event.state_key}) 请用 Reaction {hash_user_id(event.state_key)} 回复本条消息",
+                notice=True,
+                extended_data={"type": "join_confirm", "state_key": event.state_key},
+            )

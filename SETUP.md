@@ -1,16 +1,12 @@
 # Setup
 
-nio-template is a sample repository of a working Matrix bot that can be taken
-and transformed into one's own bot, service or whatever else may be necessary.
-Below is a quick setup guide to running the existing bot.
-
 ## Install the dependencies
 
 There are two paths to installing the dependencies for development.
 
 ### Using `docker-compose`
 
-It is **recommended** to use Docker Compose to run the bot while
+Docker Compose is a good way to run the bot while
 developing, as all necessary dependencies are handled for you. After
 installation and ensuring the `docker-compose` command works, you need to:
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import asyncio
 import logging
 import sys
 from time import sleep
@@ -11,14 +10,13 @@ from nio import (
     InviteMemberEvent,
     LocalProtocolError,
     LoginError,
-    MegolmEvent,
-    RoomMessageText,
+    RoomMemberEvent,
+    SyncError,
     UnknownEvent,
 )
 
 from jose_bot.callbacks import Callbacks
 from jose_bot.config import Config
-from jose_bot.storage import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -36,15 +34,12 @@ async def main():
     # Read the parsed config file and create a Config object
     config = Config(config_path)
 
-    # Configure the database
-    store = Storage(config.database)
-
     # Configuration options for the AsyncClient
     client_config = AsyncClientConfig(
         max_limit_exceeded=0,
         max_timeouts=0,
         store_sync_tokens=True,
-        encryption_enabled=True,
+        encryption_enabled=False,
     )
 
     # Initialize the matrix client
@@ -52,7 +47,6 @@ async def main():
         config.homeserver_url,
         config.user_id,
         device_id=config.device_id,
-        store_path=config.store_path,
         config=client_config,
     )
 
@@ -60,22 +54,10 @@ async def main():
         client.access_token = config.user_token
         client.user_id = config.user_id
 
-    # Set up event callbacks
-    callbacks = Callbacks(client, store, config)
-    client.add_event_callback(callbacks.message, (RoomMessageText,))
-    client.add_event_callback(
-        callbacks.invite_event_filtered_callback, (InviteMemberEvent,)
-    )
-    client.add_event_callback(callbacks.decryption_failure, (MegolmEvent,))
-    client.add_event_callback(callbacks.unknown, (UnknownEvent,))
-
     # Keep trying to reconnect on failure (with some time in-between)
     while True:
         try:
             if config.user_token:
-                # Use token to log in
-                client.load_store()
-
                 # Sync encryption keys with the server
                 if client.should_upload_keys:
                     await client.keys_upload()
@@ -105,17 +87,35 @@ async def main():
                 # Login succeeded!
 
             logger.info(f"Logged in as {config.user_id}")
-            await client.sync_forever(timeout=30000, full_state=True)
 
-        except (ClientConnectionError, ServerDisconnectedError):
+            # Do a initial sync
+            resp = await client.sync(timeout=30000, full_state=True)
+            while isinstance(resp, SyncError):
+                logger.warning("Initial sync failed, retrying in 30s...")
+                sleep(30)
+                resp = await client.sync(timeout=30000, full_state=True)
+            logger.info("Initial sync completed.")
+            sync_token = resp.next_batch
+
+            # Set up event callbacks
+            callbacks = Callbacks(client, config)
+            client.add_event_callback(
+                callbacks.invite_event_filtered_callback, (InviteMemberEvent,)
+            )
+            client.add_event_callback(callbacks.membership, (RoomMemberEvent,))
+            client.add_event_callback(callbacks.unknown, (UnknownEvent,))
+
+            await client.sync_forever(timeout=30000, full_state=True, since=sync_token)
+
+        except (ClientConnectionError, ServerDisconnectedError, TimeoutError):
             logger.warning("Unable to connect to homeserver, retrying in 15s...")
 
+            # Sleep so we don't bombard the server with login requests
+            sleep(15)
+        except Exception:
+            logger.exception("An exception was raised.")
             # Sleep so we don't bombard the server with login requests
             sleep(15)
         finally:
             # Make sure to close the client connection on disconnect
             await client.close()
-
-
-# Run the main function in an asyncio event loop
-asyncio.get_event_loop().run_until_complete(main())

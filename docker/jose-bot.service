@@ -1,5 +1,5 @@
 [Unit]
-Description=A matrix bot that does amazing things!
+Description=Jose bot (Join confirm bot)
 
 [Service]
 Type=simple

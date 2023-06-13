@@ -58,35 +58,6 @@ class Config:
             handler.setFormatter(formatter)
             logger.addHandler(handler)
 
-        # Storage setup
-        self.store_path = self._get_cfg(["storage", "store_path"], required=True)
-
-        # Create the store folder if it doesn't exist
-        if not os.path.isdir(self.store_path):
-            if not os.path.exists(self.store_path):
-                os.mkdir(self.store_path)
-            else:
-                raise ConfigError(
-                    f"storage.store_path '{self.store_path}' is not a directory"
-                )
-
-        # Database setup
-        database_path = self._get_cfg(["storage", "database"], required=True)
-
-        # Support both SQLite and Postgres backends
-        # Determine which one the user intends
-        sqlite_scheme = "sqlite://"
-        postgres_scheme = "postgres://"
-        if database_path.startswith(sqlite_scheme):
-            self.database = {
-                "type": "sqlite",
-                "connection_string": database_path[len(sqlite_scheme) :],
-            }
-        elif database_path.startswith(postgres_scheme):
-            self.database = {"type": "postgres", "connection_string": database_path}
-        else:
-            raise ConfigError("Invalid connection string for storage.database")
-
         # Matrix bot account setup
         self.user_id = self._get_cfg(["matrix", "user_id"], required=True)
         if not re.match("@.*:.*", self.user_id):
@@ -102,8 +73,6 @@ class Config:
             ["matrix", "device_name"], default="nio-template"
         )
         self.homeserver_url = self._get_cfg(["matrix", "homeserver_url"], required=True)
-
-        self.command_prefix = self._get_cfg(["command_prefix"], default="!c") + " "
 
     def _get_cfg(
         self,
