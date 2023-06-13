@@ -33,3 +33,7 @@ logging:
   console_logging:
     # Whether logging to the console is enabled
     enabled: true
+
+# (String[]) Allow the following servers to join without needing join confirmation
+allowed_servers:
+  - "example.com"

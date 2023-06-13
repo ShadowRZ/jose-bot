@@ -15,7 +15,13 @@ from nio import (
 
 from jose_bot.chat_functions import send_text_to_room
 from jose_bot.config import Config
-from jose_bot.utils import get_bot_event_type, hash_user_id, is_bot_event, user_name
+from jose_bot.utils import (
+    get_bot_event_type,
+    get_user_id_parts,
+    hash_user_id,
+    is_bot_event,
+    user_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +159,9 @@ class Callbacks:
             "invite",
             "leave",
         ):
+            _, domain = get_user_id_parts(event.state_key)
+            if domain in self.config.allowed_servers:
+                return
             content = event.content or {}
             name = content.get("displayname")
             logger.debug(

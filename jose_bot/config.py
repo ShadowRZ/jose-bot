@@ -73,6 +73,11 @@ class Config:
             ["matrix", "device_name"], default="nio-template"
         )
         self.homeserver_url = self._get_cfg(["matrix", "homeserver_url"], required=True)
+        self.allowed_servers = self._get_cfg(
+            ["allowed_servers"], default=[], required=False
+        )
+        if not isinstance(self.allowed_servers, list):
+            raise ConfigError("allowed_servers must be an array of strings")
 
     def _get_cfg(
         self,
