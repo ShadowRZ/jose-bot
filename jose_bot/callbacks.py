@@ -127,7 +127,9 @@ class Callbacks:
                 users = content.get("users")
                 del users[state_key]
                 await self.client.room_put_state(
-                    room.room_id, "m.room.power_levels", {"events": events, "users": users}
+                    room.room_id,
+                    "m.room.power_levels",
+                    {"events": events, "users": users},
                 )
 
     async def unknown(self, room: MatrixRoom, event: UnknownEvent) -> None:
