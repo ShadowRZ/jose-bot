@@ -63,10 +63,20 @@ class Config:
         if not re.match("@.*:.*", self.user_id):
             raise ConfigError("matrix.user_id must be in the form @name:domain")
 
-        self.user_password = self._get_cfg(["matrix", "user_password"], required=False)
-        self.user_token = self._get_cfg(["matrix", "user_token"], required=False)
-        if not self.user_token and not self.user_password:
-            raise ConfigError("Must supply either user token or password")
+        user_password = os.environ.get("JOSE_BOT_PASSWORD")
+        if not user_password:
+            self.user_password = self._get_cfg(
+                ["matrix", "user_password"], required=False
+            )
+            self.user_token = self._get_cfg(["matrix", "user_token"], required=False)
+            if not self.user_token and not self.user_password:
+                raise ConfigError(
+                    "Must supply either user token or password, "
+                    "or use the environment variable JOSE_BOT_PASSWORD to provide the password. "
+                    "The environment variable takes priority than config file."
+                )
+        else:
+            self.user_password = user_password
 
         self.device_id = self._get_cfg(["matrix", "device_id"], required=True)
         self.device_name = self._get_cfg(
