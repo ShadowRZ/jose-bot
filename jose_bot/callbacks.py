@@ -113,12 +113,12 @@ class Callbacks:
                 event.source.get("content", {}).get("m.relates_to", {}).get("key")
             )
 
-            if reaction_content == required_reaction:
+            if reaction_content == required_reaction and event.sender == state_key:
                 state_resp = await self.client.room_get_state_event(
                     room.room_id, "m.room.power_levels"
                 )
                 if isinstance(state_resp, RoomGetStateEventError):
-                    logger.debug(
+                    logger.warn(
                         f"Failed to get power level data in room {room.display_name} ({room.room_id}). Stop processing."
                     )
                     return
@@ -130,6 +130,11 @@ class Callbacks:
                     room.room_id,
                     "m.room.power_levels",
                     {"events": events, "users": users},
+                )
+                await self.client.room_redact(
+                    room.room_id,
+                    reacted_to_event.event_id,
+                    "Join confirmation finished",
                 )
 
     async def unknown(self, room: MatrixRoom, event: UnknownEvent) -> None:
@@ -156,7 +161,9 @@ class Callbacks:
         )
 
     async def membership(self, room: MatrixRoom, event: RoomMemberEvent) -> None:
-        if event.membership == "join" and event.prev_membership in (
+        if event.membership in ("leave", "ban", "invite"):
+            return
+        elif event.membership == "join" and event.prev_membership in (
             None,
             "invite",
             "leave",
