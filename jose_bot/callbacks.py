@@ -211,7 +211,14 @@ class Callbacks:
             await send_text_to_room(
                 self.client,
                 room.room_id,
-                f"新加群的用户 {user_name(room, event.state_key)} ({event.state_key}) 请用 Reaction {hash_user_id(event.state_key)} 回复本条消息",
+                """\
+新加群的用户 {0} ({1}) 请用 Reaction {2} 回复本条消息
+Newly joined {0} ({1}), please react to this message with {2}\
+""".format(
+                    user_name(room, event.state_key),
+                    event.state_key,
+                    hash_user_id(event.state_key),
+                ),
                 notice=True,
                 extended_data={"type": "join_confirm", "state_key": event.state_key},
             )
