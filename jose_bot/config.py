@@ -77,6 +77,7 @@ class Config:
                 )
         else:
             self.user_password = user_password
+            self.user_token = None
 
         self.device_id = self._get_cfg(["matrix", "device_id"], required=True)
         self.device_name = self._get_cfg(
