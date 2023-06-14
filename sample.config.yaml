@@ -37,3 +37,6 @@ logging:
 # (String[]) Allow the following servers to join without needing join confirmation
 allowed_servers:
   - "example.com"
+
+# (Bool) Dry run mode (don't do anything, just log)
+dry_run: true

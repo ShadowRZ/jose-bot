@@ -76,6 +76,7 @@ class Config:
         self.allowed_servers = self._get_cfg(
             ["allowed_servers"], default=[], required=False
         )
+        self.dry_run = self._get_cfg(["dry_run"], required=False, default=False)
         if not isinstance(self.allowed_servers, list):
             raise ConfigError("allowed_servers must be an array of strings")
 

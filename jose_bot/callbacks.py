@@ -161,19 +161,24 @@ class Callbacks:
             "invite",
             "leave",
         ):
-            _, domain = get_user_id_parts(event.state_key)
-            if domain in self.config.allowed_servers:
-                return
             content = event.content or {}
             name = content.get("displayname")
-            logger.debug(
+            logger.info(
                 f"New user joined in {room.display_name}: {name} ({event.state_key})"
             )
+            _, domain = get_user_id_parts(event.state_key)
+            if domain in self.config.allowed_servers:
+                logger.info(
+                    f"{name} ({event.state_key}) is in allowed servers. Stop processing."
+                )
+                return
+            if self.config.dry_run:
+                return
             state_resp = await self.client.room_get_state_event(
                 room.room_id, "m.room.power_levels"
             )
             if isinstance(state_resp, RoomGetStateEventError):
-                logger.debug(
+                logger.warn(
                     f"Failed to get power level data in room {room.display_name} ({room.room_id}). Stop processing."
                 )
                 return
@@ -183,7 +188,7 @@ class Callbacks:
             users = content.get("users")
             powers = PowerLevels(events=events, users=users)
             if not powers.can_user_send_state(self.client.user, "m.room.power_levels"):
-                logger.debug(
+                logger.warn(
                     f"Bot is unable to update power levels in {room.display_name} ({room.room_id}). Stop processing."
                 )
                 return
